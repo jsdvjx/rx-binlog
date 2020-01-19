@@ -1,0 +1,45 @@
+{
+    "name": "rx-binlog",
+    "version": "0.1.0",
+    "description": "",
+    "main": "dist/index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "ts-node src/index.ts",
+        "build": "rimraf dist&&tsc"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/jsdvjx/String2Fun.git"
+    },
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/jsdvjx/String2Fun/issues"
+    },
+    "homepage": "https://github.com/jsdvjx/String2Fun#readme",
+    "devDependencies": {
+        "@types/mysql2": "types/mysql2",
+        "@types/node": "^12.7.4",
+        "@typescript-eslint/eslint-plugin": "^2.1.0",
+        "@typescript-eslint/parser": "^2.1.0",
+        "eslint": "^6.3.0",
+        "eslint-config-standard": "^14.1.0",
+        "eslint-plugin-import": "^2.18.2",
+        "eslint-plugin-node": "^10.0.0",
+        "eslint-plugin-promise": "^4.2.1",
+        "eslint-plugin-standard": "^4.0.1",
+        "prettier": "^1.18.2",
+        "rimraf": "^3.0.0",
+        "ts-node": "^8.3.0",
+        "typescript": "^3.6.2"
+    },
+    "dependencies": {
+        "@types/lodash": "^4.14.149",
+        "axios": "^0.19.0",
+        "json-to-ts": "^1.6.0",
+        "lodash": "^4.17.15",
+        "mysql2": "^2.1.0",
+        "rxjs": "^6.5.3"
+    }
+}
