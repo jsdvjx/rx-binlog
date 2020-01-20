@@ -46,7 +46,7 @@ export type option = {
 };
 export interface MysqlBinlogFile { Log_name: string, File_size: number }
 export class Binlog {
-    private path = `${process.cwd()}/bin/mysqlbinlog`
+    private path = `${__dirname}/../bin/mysqlbinlog`
     constructor(private option: BinlogOption) { }
     private conn = Conn.create(this.option)
     private ms = new MysqlSchema(this.conn)
