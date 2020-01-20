@@ -6,6 +6,7 @@ import { tap, map, mergeMap, switchMap, toArray } from "rxjs/operators";
 import { Query } from "./query";
 import { stringify } from "querystring";
 import { writeFileSync } from "fs";
+import { Conn } from './conn'
 
 export interface EventInfo {
     type: "UPDATE" | "INSERT" | "DELETE" | "UNKOWN",
@@ -47,13 +48,7 @@ export interface MysqlBinlogFile { Log_name: string, File_size: number }
 export class Binlog {
     private path = `${process.cwd()}/bin/mysqlbinlog`
     constructor(private option: BinlogOption) { }
-    private conn = mysql.createConnection({
-        host: this.option.host,
-        user: this.option.username,
-        password: this.option.password,
-        port: this.option.port,
-        database: this.option.database
-    });
+    private conn = Conn.create(this.option)
     private ms = new MysqlSchema(this.conn)
     private query = new Query(this.conn)
     private _schema!: MysqlMap;
@@ -212,7 +207,9 @@ export class Binlog {
         ]);
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent<UpdateBody | InsertBody | DeleteBody | ErrorBody>>) => {
             stream.stdout.on("data", (chunk) => {
+                writeFileSync('./1.txt', chunk.toString(), { flag: 'a' });
                 const result = chunk.toString().split('/*!*/;');
+
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
                 for (const str of list) {
                     if (str.length) {
@@ -249,4 +246,6 @@ export class Binlog {
             })
         )
     }
+
+    pgsql_ddl = this.ms.pgsql_ddl.bind(this.ms.pgsql_ddl)
 }
