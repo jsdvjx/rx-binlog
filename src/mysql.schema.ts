@@ -1,5 +1,5 @@
 import * as mysql from 'mysql2'
-import { Observable, Observer } from 'rxjs';
+import { Observable, Observer, of } from 'rxjs';
 import { map, toArray, tap, publishReplay } from 'rxjs/operators'
 export type MysqlType = 'varchar' | 'bigint' | 'longtext' | 'datetime' | 'int' | 'tinyint' | 'decimal' | 'double' | 'char' | 'timestamp' | 'set' | 'enum' | 'float' | 'longblob' | 'mediumtext' | 'mediumblob' | 'smallint' | 'text' | 'blob' | 'time' | 'date' | 'mediumint';
 export type MysqlColumnKey = 'MUL' | 'PRI' | 'UNI'
@@ -19,12 +19,13 @@ export type MysqlMap = Record<string, Record<string, Record<string, MysqlColumn>
 export interface Mysql2ddl {
 
 }
-export type DdlCreater = (pgsql: { shcema: string, table: string }, mysql: { database: string, table: string }) => Observable<string>;
+export type DdlCreater = (pgsql: { schema: string, table: string }, mysql: { database: string, table: string }) => Observable<string>;
 export class MysqlSchema {
     private sql = `SELECT TABLE_SCHEMA,TABLE_NAME,ORDINAL_POSITION,DATA_TYPE,IS_NULLABLE,COLUMN_NAME,COLUMN_KEY,CHARACTER_MAXIMUM_LENGTH,NUMERIC_PRECISION,NUMERIC_SCALE from information_schema.\`COLUMNS\``;
     constructor(private conn: mysql.Connection) {
 
     }
+    private _schema!: MysqlMap;
     private query = <T = any>() => {
         return new Observable<T>((obser: Observer<T>) => {
             const q = this.conn.query(this.sql).on('result', (db) => {
@@ -49,9 +50,10 @@ export class MysqlSchema {
                 }))]
             }))
         }
-        return this.query<MysqlColumn>().pipe(
+        return this._schema ? of(this._schema) : this.query<MysqlColumn>().pipe(
             toArray(),
-            map(dbGroup)
+            map(dbGroup),
+            tap(_s => this._schema = _s)
         )
     }
     private static m2p_type = (column: MysqlColumn) => {
@@ -89,8 +91,8 @@ export class MysqlSchema {
                 const pkc = columns.filter(col => col.COLUMN_KEY === 'PRI').pop()
                 const types = columns.sort((a, b) => parseInt(a.ORDINAL_POSITION) - parseInt(b.ORDINAL_POSITION)).map(col => {
                     return `    ${col.COLUMN_NAME} ${MysqlSchema.m2p_type(col)} ${col.IS_NULLABLE ? '' : 'NOT NULL'}`
-                }).join(',\n') +"\n    "+ ((pkc && pkc?.COLUMN_NAME) ? `,PRIMARY KEY("${pkc?.COLUMN_NAME}")` : '');
-                return `CREATE TABLE "${pgsql.shcema}"."${pgsql.table}" (\n${types})`
+                }).join(',\n') + "\n    " + ((pkc && pkc?.COLUMN_NAME) ? `,PRIMARY KEY("${pkc?.COLUMN_NAME}")` : '');
+                return `CREATE TABLE IF NOT EXISTS "${pgsql.schema}"."${pgsql.table}" (\n${types})`
             })
         )
     }

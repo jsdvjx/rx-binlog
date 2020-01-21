@@ -207,9 +207,7 @@ export class Binlog {
         ]);
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent<UpdateBody | InsertBody | DeleteBody | ErrorBody>>) => {
             stream.stdout.on("data", (chunk) => {
-                writeFileSync('./1.txt', chunk.toString(), { flag: 'a' });
                 const result = chunk.toString().split('/*!*/;');
-
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
                 for (const str of list) {
                     if (str.length) {

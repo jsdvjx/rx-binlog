@@ -2,7 +2,7 @@ import { Connection } from "mysql2";
 import { Query } from "./query";
 import { pluck, switchMap, map, take, concatMap, bufferCount, toArray } from "rxjs/operators";
 import { Observable, interval, range, concat, merge } from "rxjs";
-import { Option, Conn } from "./conn";
+import { Option,Conn } from "./conn";
 
 export class Puller {
     private conn = Conn.create(this.option)
@@ -17,7 +17,7 @@ export class Puller {
             }),
             bufferCount(this.threads),
             concatMap(sql_list => {
-                return merge(...sql_list.map(sql => this.query.run(sql))).pipe(toArray())
+                return merge(...sql_list.map(sql => this.query.run(sql)))
             })
         )
     }
