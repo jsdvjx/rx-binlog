@@ -2,11 +2,11 @@ import { spawn } from "child_process"
 import { Observable, Observer, of, zip } from 'rxjs'
 import * as mysql from 'mysql2'
 import { MysqlSchema, MysqlColumn, MysqlMap } from "./mysql.schema";
-import { tap, map, mergeMap, switchMap, toArray } from "rxjs/operators";
+import { tap, map, switchMap, toArray } from "rxjs/operators";
 import { Query } from "./query";
-import { stringify } from "querystring";
-import { writeFileSync } from "fs";
 import { Conn } from './conn'
+import moment from "moment";
+import { writeFileSync } from "fs";
 
 export interface EventInfo {
     type: "UPDATE" | "INSERT" | "DELETE" | "UNKOWN",
@@ -212,9 +212,10 @@ export class Binlog {
             ...this.dbParam,
             ...options
         ]);
+        
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent<UpdateBody | InsertBody | DeleteBody | ErrorBody>>) => {
+            
             stream.stdout.on("data", (chunk) => {
-                writeFileSync('./test.txt', chunk.toString(), { flag: 'a' })
                 const result = chunk.toString().split('/*!*/;');
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
                 for (const str of list) {
@@ -223,6 +224,8 @@ export class Binlog {
                     }
                 }
 
+            })
+            stream.stderr.on('data', (s) => {
             })
             stream.on('error', (err) => {
                 obser.error(err);
@@ -237,7 +240,15 @@ export class Binlog {
     autoLog = () => {
         return this.position().pipe(switchMap(this.run))
     }
-    private position = () => {
+    startWithLastFile = () => {
+        return this.position(false).pipe(
+            map(list => {
+                return [ ...list]
+            }),
+            switchMap(this.run)
+        )
+    }
+    private position = (pos: boolean = true) => {
         return this.query.run<MysqlBinlogFile>('show BINARY logs').pipe(
             map(log => (log.Log_name = log.Log_name.replace('mysql-bin.', ''), log)),
             toArray(),
@@ -246,9 +257,12 @@ export class Binlog {
                 , { idx: 0, size: 0, len: 0 } as { idx: number; size: number, len: number })
             ),
             map(position => {
-                return [
+                return pos ? [
                     `--start-position=${position.size}`,
                     `mysql-bin.${Array(position.len - position.idx.toString().length + 1).join('0')}${position.idx}`]
+                    : [
+                        `mysql-bin.${Array(position.len - position.idx.toString().length + 1).join('0')}${position.idx}`
+                    ]
             })
         )
     }
