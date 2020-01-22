@@ -15,6 +15,7 @@ export interface EventInfo {
     pk: string,
     uni: string[]
     emit_at: Date
+    sid: number
 }
 export interface UpdateBody {
     source: Record<string, any>
@@ -175,8 +176,14 @@ export class Binlog {
     }
     private static resolve = (input: string): BinlogEvent<InsertBody | UpdateBody | DeleteBody | ErrorBody> => {
         const _info = /### (?<type>UPDATE|INSERT|DELETE).+\`(?<database>.+?)\`\.\`(?<table>.+?)\`/.exec(input)?.groups;
+        const server_tag = /#(?<emit_at>[\d]{6} [\d:]{8}) server id (?<sid>[\d]{4,10}).+Xid/.exec(input)?.groups ?? { emit_at: '000000 00:00:00', sid: '0' };
+        let date = '20'
+        for (let i = 0; i < 3; i++) {
+            date += ((i === 0 ? '' : '-') + server_tag.emit_at.substring(2 * i, 2 * i + 2))
+        }
+        server_tag.emit_at = date + ' ' + server_tag.emit_at.split(' ').pop()
         if (_info?.type) {
-            const info: EventInfo = { ..._info, uni: [], pk: '', emit_at: new Date } as any;
+            const info: EventInfo = { ..._info, uni: [], pk: '', emit_at: new Date(server_tag.emit_at), sid: parseInt(server_tag.sid) } as any;
             const values = input.match(/@[\d]{1,2}\=.+/g) || [];
             const body: InsertBody | DeleteBody = { error: false, source: values.reduce((res, acc) => (res[acc.split("=")[0]] = acc.split("=")[1], res), {} as Record<string, string>) }
             switch (info.type) {
@@ -188,7 +195,7 @@ export class Binlog {
                     return { info, body };
             }
         }
-        return { info: { table: '', database: '', type: 'UNKOWN', pk: '', uni: [], emit_at: new Date }, body: { error: true, msg: 'unkown', code: 10001 } };
+        return { info: { table: '', database: '', type: 'UNKOWN', pk: '', uni: [], emit_at: new Date(server_tag.emit_at), sid: parseInt(server_tag.sid) }, body: { error: true, msg: 'unkown', code: 10001 } };
     }
     private baseParam = ['-R', '--stop-never', '-v']
     private get dbParam() {
@@ -207,6 +214,7 @@ export class Binlog {
         ]);
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent<UpdateBody | InsertBody | DeleteBody | ErrorBody>>) => {
             stream.stdout.on("data", (chunk) => {
+                writeFileSync('./test.txt', chunk.toString(), { flag: 'a' })
                 const result = chunk.toString().split('/*!*/;');
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
                 for (const str of list) {

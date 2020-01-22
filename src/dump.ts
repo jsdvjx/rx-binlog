@@ -25,7 +25,6 @@ export class Dump {
         return this.query.run(`select count(0)cnt from \`${option.src.database}\`.\`${option.src.table}\``).pipe(
             pluck("cnt"),
             mergeMap((total: number) => {
-                console.log(total)
                 const times = Math.ceil(total / take);
                 return from(range(0, times).map((page) => [page * take, take]).map(([start, end]) =>
                     `${this.path} ${this.dbParam.join(' ')} -w"true ${pk} limit ${start},${end}" --single-transaction -q --databases ${option.src.database} --tables ${option.src.table}`, { maxBuffer: 1024 * 1024 * 1024 * 2 }
@@ -41,7 +40,6 @@ export class Dump {
                         if (!_last) last = (tmp.pop() || '')
                         for (const sql of tmp) {
                             obser.next(sql.replace(`\`${option.src.table}\``, option.dest).replace(/\\'/g, `''`).replace(/\/\*\![\d]+.+?\*\/;/g, ''))
-                            process.exit(0)
                         }
                     }
                     stream.stdout?.on('data', (chunk: string) => {
