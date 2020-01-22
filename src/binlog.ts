@@ -72,7 +72,6 @@ export class Binlog {
         }
 
         const map = schema[event.info.database] ? schema[event.info.database][event.info.table] : null;
-
         if (!map) return event;
         const cols = Object.values(map)
         for (const col of cols) {
@@ -91,6 +90,8 @@ export class Binlog {
                 if (/^'[\w\W]*?'$/) {
                     _value = /^'(?<content>[\w\W]*?)'$/.exec(_value)?.groups?.content || _value
                 }
+
+                res[name] = _value === `''` ? '' : _value;
                 if (info.IS_NULLABLE === 'YES' && _value == 'NULL') {
                     res[name] = null;
                 } else switch (info.DATA_TYPE) {
@@ -145,6 +146,7 @@ export class Binlog {
     }
     private static resolve_update = (values: string[] | null): UpdateBody | ErrorBody => {
         if ((values?.length && values.length > 0)) {
+
             const data = values.reduce((res, acc) => {
                 const [name, value] = acc.split('=');
                 const target = res[res[0][name] ? 1 : 0];
@@ -176,7 +178,7 @@ export class Binlog {
     }
     private static resolve = (input: string): BinlogEvent<InsertBody | UpdateBody | DeleteBody | ErrorBody> => {
         const _info = /### (?<type>UPDATE|INSERT|DELETE).+\`(?<database>.+?)\`\.\`(?<table>.+?)\`/.exec(input)?.groups;
-        const server_tag = /#(?<emit_at>[\d]{6} [\d:]{8}) server id (?<sid>[\d]{4,10}).+Xid/.exec(input)?.groups ?? { emit_at: '000000 00:00:00', sid: '0' };
+        const server_tag = /#(?<emit_at>[\d]{6} [\d:]{8}) server id (?<sid>[\d]{4,10}).+Xid/.exec(input)?.groups ?? { emit_at: moment().format("YYYY-MM-DD HH:mm:ss"), sid: '0' };
         let date = '20'
         for (let i = 0; i < 3; i++) {
             date += ((i === 0 ? '' : '-') + server_tag.emit_at.substring(2 * i, 2 * i + 2))
@@ -212,9 +214,9 @@ export class Binlog {
             ...this.dbParam,
             ...options
         ]);
-        
+
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent<UpdateBody | InsertBody | DeleteBody | ErrorBody>>) => {
-            
+
             stream.stdout.on("data", (chunk) => {
                 const result = chunk.toString().split('/*!*/;');
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
@@ -243,7 +245,7 @@ export class Binlog {
     startWithLastFile = () => {
         return this.position(false).pipe(
             map(list => {
-                return [ ...list]
+                return [...list]
             }),
             switchMap(this.run)
         )
