@@ -1,10 +1,15 @@
 import { BinlogOption } from "./binlog";
 import { spawn, exec } from "child_process";
-import { Observable, Observer } from "rxjs";
+import { Observable, Observer, from } from "rxjs";
 import { writeFileSync } from "fs";
+import { Query } from "./query";
+import { Conn } from "./conn";
+import { pluck, map, tap, concatMap, mergeMap } from "rxjs/operators";
+import { range } from "lodash/fp";
 
 export class Dump {
     private path = `${__dirname}/../bin/mysqldump`
+    private query = new Query(Conn.create(this.option));
     constructor(private option: BinlogOption) { }
     private get dbParam() {
         return [
@@ -13,31 +18,48 @@ export class Dump {
             `--user=${this.option.username}`
         ]
     }
-    stream = (option: { src: { table: string, database: string }, dest: string }) => {
-        return new Observable<string>((obser: Observer<string>) => {
-            const stream = exec(`${this.path} ${this.dbParam.join(' ')} --single-transaction -q --databases ${option.src.database} --tables ${option.src.table}`, { maxBuffer: 1024 * 1024 * 1024  });
-            let last: string = ''
-            stream.stdout?.on('data', (chunk: string) => {
-                const tmp = (last + chunk).split('\n').filter(i => i.indexOf('INSERT INTO') === 0 && i.length > 10);
-                last = (tmp.pop() || '')
-                for (const sql of tmp) {
-                    obser.next(sql.replace(`\`${option.src.table}\``, option.dest).replace(/\\'/g, `''`))
-                }
-            })
-            stream.stdout?.on('end', () => {
-                obser.next(last.replace(`\`${option.src.table}\``, option.dest).replace(/\\'/g, `''`))
-            })
-            stream.stderr?.on('data', (chunk) => {
-            })
-            stream.on('error', (error) => {
-                obser.error(error);
-            })
-            stream.on('close', () => {
-                obser.complete()
-            })
-        })
 
-
+    insertSql = (option: { src: { table: string, database: string, pk?: string }, dest: string }) => {
+        const take = 500000;
+        const pk = option.src.pk ? `order by ${option.src.pk} asc` : '';
+        return this.query.run(`select count(0)cnt from \`${option.src.database}\`.\`${option.src.table}\``).pipe(
+            pluck("cnt"),
+            mergeMap((total: number) => {
+                console.log(total)
+                const times = Math.ceil(total / take);
+                return from(range(0, times).map((page) => [page * take, take]).map(([start, end]) =>
+                    `${this.path} ${this.dbParam.join(' ')} -w"true ${pk} limit ${start},${end}" --single-transaction -q --databases ${option.src.database} --tables ${option.src.table}`, { maxBuffer: 1024 * 1024 * 1024 * 2 }
+                ));
+            }),
+            concatMap(cmd => {
+                return new Observable<string>((obser: Observer<string>) => {
+                    const stream = exec(cmd,
+                        { maxBuffer: 1024 * 1024 * 1024 * 2, });
+                    let last: string = ''
+                    const nextInsertSql = (chunk: string, _last: boolean = false) => {
+                        const tmp = (last + chunk).split('\n').filter(i => i.indexOf('INSERT INTO') === 0 && i.length > 10);
+                        if (!_last) last = (tmp.pop() || '')
+                        for (const sql of tmp) {
+                            obser.next(sql.replace(`\`${option.src.table}\``, option.dest).replace(/\\'/g, `''`).replace(/\/\*\![\d]+.+?\*\/;/g, ''))
+                            process.exit(0)
+                        }
+                    }
+                    stream.stdout?.on('data', (chunk: string) => {
+                        nextInsertSql(chunk)
+                    })
+                    stream.stdout?.on('end', () => {
+                        nextInsertSql('', true)
+                    })
+                    stream.stderr?.on('data', (chunk) => {
+                    })
+                    stream.on('error', (error) => {
+                        obser.error(error);
+                    })
+                    stream.on('close', () => {
+                        obser.complete()
+                    })
+                })
+            })
+        )
     }
-
 }
