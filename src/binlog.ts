@@ -13,9 +13,10 @@ export interface EventInfo {
     database: string,
     table: string,
     pk: string,
-    uni: string[]
-    emit_at: Date
-    sid: number
+    uni: string[],
+    emit_at: Date,
+    sid: number,
+    value: string | number
 }
 export interface UpdateBody {
     source: Record<string, any>
@@ -127,16 +128,20 @@ export class Binlog {
                 return (res);
             }, {} as Record<string, Date | number | string | null>)
         }
+        let value = 0;
         switch (event.info.type) {
             case 'UPDATE':
                 (event.body as UpdateBody).source = resolve((event.body as UpdateBody).source);
                 (event.body as UpdateBody).update = resolve((event.body as UpdateBody).update);
+                value = (event.body as UpdateBody).source[event.info.pk] || value;
                 break;
             case 'INSERT':
             case 'DELETE':
+                value = (event.body as UpdateBody).source[event.info.pk] || value;
                 (event.body as DeleteBody).source = resolve((event.body as DeleteBody).source)
                 break;
         }
+        event.info.value = value;
         return event;
     }
     private static check = (input: string) => {
@@ -178,7 +183,7 @@ export class Binlog {
     }
     private static resolve = (input: string): BinlogEvent<InsertBody | UpdateBody | DeleteBody | ErrorBody> => {
         const _info = /### (?<type>UPDATE|INSERT|DELETE).+\`(?<database>.+?)\`\.\`(?<table>.+?)\`/.exec(input)?.groups;
-        const server_tag = /#(?<emit_at>[\d]{6} [\d:]{8}) server id (?<sid>[\d]{4,10}).+Xid/.exec(input)?.groups ?? { emit_at: moment().format("YYYY-MM-DD HH:mm:ss"), sid: '0' };
+        const server_tag = /#(?<emit_at>[\d]{6} [\d:]{8}) server id (?<sid>[\d]{4,10}).+Xid/.exec(input)?.groups ?? { emit_at: moment().format("YYYYMMDD HH:mm:ss").substr(2), sid: '0' };
         let date = '20'
         for (let i = 0; i < 3; i++) {
             date += ((i === 0 ? '' : '-') + server_tag.emit_at.substring(2 * i, 2 * i + 2))
@@ -197,7 +202,7 @@ export class Binlog {
                     return { info, body };
             }
         }
-        return { info: { table: '', database: '', type: 'UNKOWN', pk: '', uni: [], emit_at: new Date(server_tag.emit_at), sid: parseInt(server_tag.sid) }, body: { error: true, msg: 'unkown', code: 10001 } };
+        return { info: { value: 0, table: '', database: '', type: 'UNKOWN', pk: '', uni: [], emit_at: new Date(server_tag.emit_at), sid: parseInt(server_tag.sid) }, body: { error: true, msg: 'unkown', code: 10001 } };
     }
     private baseParam = ['-R', '--stop-never', '-v']
     private get dbParam() {
@@ -220,6 +225,7 @@ export class Binlog {
             stream.stdout.on("data", (chunk) => {
                 const result = chunk.toString().split('/*!*/;');
                 const list = result.filter(Binlog.check).join('\n').split(/BINLOG '[\w\W]+?'/).filter(Binlog.check);
+
                 for (const str of list) {
                     if (str.length) {
                         obser.next(Binlog.transform(this._schema, Binlog.resolve(str)))
