@@ -211,6 +211,7 @@ export class Binlog {
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent>) => {
             const br = new BinlogResolver;
             stream.stdout.on("data", (chunk) => {
+                writeFileSync('./1.txt', chunk, { flag: 'a' })
                 br.push(chunk.toString());
             })
             br.stream().subscribe((response) => {

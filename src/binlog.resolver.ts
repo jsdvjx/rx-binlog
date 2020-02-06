@@ -176,12 +176,12 @@ export class BinlogResolver {
     private static headResolve = (head: string, info: EventSimpleInfo) => {
         const checker: Partial<TypeChecker> = {};
         checker[EVENT_TYPE.FORMAT_DESCRIPTION_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Start: (?<description>.+)$/m;
-        checker[EVENT_TYPE.GTID_LOG_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?GTID	last_committed=(?<last_committed>\d+)	sequence_number=(?<sequence_number>\d+)	rbr_only=(?<rbr_only>.+)$/m;
+        checker[EVENT_TYPE.GTID_LOG_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?GTID	last_committed=(?<last_committed>\d+)	sequence_number=(?<sequence_number>\d+)	rbr_only=(?<rbr_only>.+?)\s*.*?$/m;
         checker[EVENT_TYPE.PREVIOUS_GTIDS_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Previous-GTIDs$/m;
         checker[EVENT_TYPE.TABLE_MAP_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Table_map: (?<table>.+?) mapped to number (?<map_to>\d+)$/m
-        checker[EVENT_TYPE.WRITE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Write_rows: table id (?<table_id>\d+) flags: STMT_END_F$/m
-        checker[EVENT_TYPE.UPDATE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Update_rows: table id (?<table_id>\d+) flags: STMT_END_F$/m
-        checker[EVENT_TYPE.DELETE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Delete_rows: table id (?<table_id>\d+) flags: STMT_END_F$/m
+        checker[EVENT_TYPE.WRITE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Write_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
+        checker[EVENT_TYPE.UPDATE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Update_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
+        checker[EVENT_TYPE.DELETE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Delete_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
         checker[EVENT_TYPE.XID_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Xid = (?<xid>\d+)$/m
         checker[EVENT_TYPE.ROTATE_EVENT] = /Rotate to (?<file>mysql-bin\.\d+?)  pos: (?<pos>\d+?)$/m
         checker[EVENT_TYPE.QUERY_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Query	thread_id=(?<thread_id>\d+?)	exec_time=(?<exec_time>\d+?)	error_code=(?<error_code>\d+)$/m
