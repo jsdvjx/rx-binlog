@@ -33,7 +33,7 @@ export class Dump {
             concatMap(cmd => {
                 return new Observable<string>((obser: Observer<string>) => {
                     const stream = exec(cmd,
-                        { maxBuffer: 1024 * 1024 * 1024 * 2, });
+                        { maxBuffer: 1024 * 1024 * 1024 * 4, });
                     let last: string = ''
                     const nextInsertSql = (chunk: string, _last: boolean = false) => {
                         const tmp = (last + chunk).split('\n').filter(i => i.indexOf('INSERT INTO') === 0 && i.length > 10);

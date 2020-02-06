@@ -211,7 +211,6 @@ export class Binlog {
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent>) => {
             const br = new BinlogResolver;
             stream.stdout.on("data", (chunk) => {
-                writeFileSync('./1.txt', chunk, { flag: 'a' })
                 br.push(chunk.toString());
             })
             br.stream().subscribe((response) => {
@@ -255,6 +254,9 @@ export class Binlog {
             }),
             switchMap(this.run)
         )
+    }
+    readFrom = ({ file, position }: { file: string, position: number }) => {
+        return [`--start_position=${position}`, file]
     }
     private getPosition = () => existsSync(this.positionPath) ? of(JSON.parse(readFileSync(this.positionPath).toString()) as { position: number; file: string }).pipe(map(item => ({ ...item, local: true }))) : this.query.run<MysqlBinlogFile>('show BINARY logs').pipe(
         map(log => (log.Log_name = log.Log_name.replace('mysql-bin.', ''), log)),
