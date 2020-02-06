@@ -1,16 +1,21 @@
 import { BinlogOption } from "./binlog";
-import { spawn, exec } from "child_process";
+import { spawn, exec, execSync } from "child_process";
 import { Observable, Observer, from } from "rxjs";
 import { writeFileSync } from "fs";
 import { Query } from "./query";
 import { Conn } from "./conn";
 import { pluck, map, tap, concatMap, mergeMap } from "rxjs/operators";
 import { range } from "lodash/fp";
+import os from 'os'
 
 export class Dump {
     private path = `${__dirname}/../bin/mysqldump`
     private query = new Query(Conn.create(this.option));
-    constructor(private option: BinlogOption) { }
+    constructor(private option: BinlogOption) {
+        if (os.platform() === 'linux') {
+            execSync(`chmod +x ${this.path}`)
+        }
+    }
     private get dbParam() {
         return [
             `--host=${this.option.host}`,

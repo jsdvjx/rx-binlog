@@ -1,4 +1,4 @@
-import { spawn } from "child_process"
+import { spawn, execSync } from "child_process"
 import { Observable, Observer, of, zip, Subject, interval } from 'rxjs'
 import * as mysql from 'mysql2'
 import { MysqlSchema, MysqlColumn, MysqlMap } from "./mysql.schema";
@@ -8,7 +8,7 @@ import { Conn } from './conn'
 import moment, { unix } from "moment";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 import { BinlogResolver, EVENT_TYPE, EventHead } from "./binlog.resolver";
-import { isNullOrUndefined } from "util";
+import os from 'os'
 export type SqlType = "UPDATE" | "INSERT" | "DELETE"
 export interface BinlogEvent extends EventHead {
     qtype: SqlType,
@@ -37,7 +37,11 @@ export type option = {
 export interface MysqlBinlogFile { Log_name: string, File_size: number }
 export class Binlog {
     private path = `${__dirname}/../bin/mysqlbinlog`
-    constructor(private option: BinlogOption) { }
+    constructor(private option: BinlogOption) {
+        if (os.platform() === 'linux') {
+            execSync(`chmod +x ${this.path}`)
+        }
+    }
     private conn = Conn.create(this.option)
     private ms = new MysqlSchema(this.conn)
     private query = new Query(this.conn)
@@ -256,7 +260,7 @@ export class Binlog {
         )
     }
     readFrom = ({ file, position }: { file: string, position: number }) => {
-        return [`--start_position=${position}`, file]
+        return this.run([`--start_position=${position}`, file])
     }
     private getPosition = () => existsSync(this.positionPath) ? of(JSON.parse(readFileSync(this.positionPath).toString()) as { position: number; file: string }).pipe(map(item => ({ ...item, local: true }))) : this.query.run<MysqlBinlogFile>('show BINARY logs').pipe(
         map(log => (log.Log_name = log.Log_name.replace('mysql-bin.', ''), log)),
