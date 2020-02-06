@@ -40,7 +40,8 @@ type STATUS = 'EVENT_START' | 'EVENT_READING' | 'EVENT_END';
 export class BinlogResolver {
     private status: STATUS = 'EVENT_END'
     private position: number = 0;
-    private static start_regexp = /^#(?<emit_at>\d{6}\s+[\d:]{5,8}) server id (?<server_id>\d+)\s+end_log_pos (?<end_log_pos>\d+).+?$/m
+    //private static start_regexp = /^#(?<emit_at>\d{6}\s+[\d:]{5,8}) server id (?<server_id>\d+)\s+end_log_pos (?<end_log_pos>\d+).+?$/m
+    private static start_regexp = /^#(?<emit_at>\d{6}\s+[\d:]{5,8}) server id (?<server_id>\d+)\s+end_log_pos (?<end_log_pos>\d+).+?(Delete_row|Write_row|Update_row|Rotate|Table_map).+?$/m
     private static end_regexp = /^# at \d+$/m
     private static end_content_regexp = /[\w\W]*?# at \d+/
     private head_str = '';
@@ -79,9 +80,6 @@ export class BinlogResolver {
     stream = () => {
         return interval(0).pipe(concatMap(() => this.read().pipe(
             //@ts-ignore
-            mergeMap(result => result === null ? timer(200).pipe(map(() => {
-                return null
-            })) : of(result)),
             filter(i => i !== null)
         ))) as Observable<[string, EventHead]>
     }
@@ -103,7 +101,7 @@ export class BinlogResolver {
             if (info === null) {
                 this.eventEnd()
             }
-            if(info) info.file = this.file;
+            if (info) info.file = this.file;
             return info
         }
         return null
@@ -175,16 +173,16 @@ export class BinlogResolver {
     }
     private static headResolve = (head: string, info: EventSimpleInfo) => {
         const checker: Partial<TypeChecker> = {};
-        checker[EVENT_TYPE.FORMAT_DESCRIPTION_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Start: (?<description>.+)$/m;
-        checker[EVENT_TYPE.GTID_LOG_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?GTID	last_committed=(?<last_committed>\d+)	sequence_number=(?<sequence_number>\d+)	rbr_only=(?<rbr_only>.+?)\s*.*?$/m;
-        checker[EVENT_TYPE.PREVIOUS_GTIDS_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Previous-GTIDs$/m;
+        //checker[EVENT_TYPE.FORMAT_DESCRIPTION_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Start: (?<description>.+)$/m;
+        //checker[EVENT_TYPE.GTID_LOG_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?GTID	last_committed=(?<last_committed>\d+)	sequence_number=(?<sequence_number>\d+)	rbr_only=(?<rbr_only>.+?)\s*.*?$/m;
+        //checker[EVENT_TYPE.PREVIOUS_GTIDS_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Previous-GTIDs$/m;
         checker[EVENT_TYPE.TABLE_MAP_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Table_map: (?<table>.+?) mapped to number (?<map_to>\d+)$/m
         checker[EVENT_TYPE.WRITE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Write_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
         checker[EVENT_TYPE.UPDATE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Update_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
         checker[EVENT_TYPE.DELETE_ROW_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Delete_rows.*?: table id (?<table_id>\d+) flags: STMT_END_F$/m
-        checker[EVENT_TYPE.XID_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Xid = (?<xid>\d+)$/m
+        //checker[EVENT_TYPE.XID_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Xid = (?<xid>\d+)$/m
         checker[EVENT_TYPE.ROTATE_EVENT] = /Rotate to (?<file>mysql-bin\.\d+?)  pos: (?<pos>\d+?)$/m
-        checker[EVENT_TYPE.QUERY_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Query	thread_id=(?<thread_id>\d+?)	exec_time=(?<exec_time>\d+?)	error_code=(?<error_code>\d+)$/m
+        //checker[EVENT_TYPE.QUERY_EVENT] = /CRC32 0x(?<crc32>[a-f\d]{8})\s+?Query	thread_id=(?<thread_id>\d+?)	exec_time=(?<exec_time>\d+?)	error_code=(?<error_code>\d+)$/m
         for (const [type, regexp] of Object.entries(checker as TypeChecker)) {
             const result = regexp.exec(head);
             let qtype = '';

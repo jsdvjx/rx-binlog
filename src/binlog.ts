@@ -211,6 +211,7 @@ export class Binlog {
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent>) => {
             const br = new BinlogResolver;
             stream.stdout.on("data", (chunk) => {
+                writeFileSync('./1.txt', chunk, { flag: 'a' })
                 br.push(chunk.toString());
             })
             br.stream().subscribe((response) => {
@@ -243,12 +244,12 @@ export class Binlog {
         })))
     }
     positionPath = process.cwd() + "/position.json"
-    private savePosition = () => writeFileSync(this.positionPath, JSON.stringify({ file: this.file, pos: this.pos }))
+    private savePosition = () => writeFileSync(this.positionPath, JSON.stringify({ file: this.file, position: this.pos }))
     autoLog = () => {
         return this.position().pipe(switchMap(this.run))
     }
     startWithLastFile = () => {
-        return this.position(false).pipe(
+        return this.position(true).pipe(
             map(list => {
                 return [...list]
             }),
