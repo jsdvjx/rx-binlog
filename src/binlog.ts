@@ -1,5 +1,5 @@
 import { spawn } from "child_process"
-import { Observable, Observer, of, zip, Subject } from 'rxjs'
+import { Observable, Observer, of, zip, Subject, interval } from 'rxjs'
 import * as mysql from 'mysql2'
 import { MysqlSchema, MysqlColumn, MysqlMap } from "./mysql.schema";
 import { tap, map, switchMap, toArray } from "rxjs/operators";
@@ -7,20 +7,20 @@ import { Query } from "./query";
 import { Conn } from './conn'
 import moment, { unix } from "moment";
 import { writeFileSync, readFileSync, existsSync } from "fs";
-export type SqlType = "UPDATE" | "INSERT" | "DELETE" | "UNKOWN"
-export interface BinlogEvent {
-    type: SqlType,
+import { BinlogResolver, EVENT_TYPE, EventHead } from "./binlog.resolver";
+import { isNullOrUndefined } from "util";
+export type SqlType = "UPDATE" | "INSERT" | "DELETE"
+export interface BinlogEvent extends EventHead {
+    qtype: SqlType,
     database: string,
     table: string,
-    pk: string,
-    uni: string[],
+    pk?: string,
+    uni?: string[],
     emit_at: Date,
-    crc32: string,
-    value: string | number
+    value?: string | number
     source: Record<string, any>
     update?: Record<string, any>
     file: string
-    position: number
 }
 
 export interface BinlogOption {
@@ -58,6 +58,31 @@ export class Binlog {
             return `--${key}=${typeof value === 'string' ? `'${value}'` : value}`
         })
     }
+    private head2event = (head: EventHead): BinlogEvent | null => {
+        if (![EVENT_TYPE.UPDATE_ROW_EVENT, EVENT_TYPE.WRITE_ROW_EVENT, EVENT_TYPE.DELETE_ROW_EVENT].includes(head.type)) {
+            return null
+        }
+        const table_id = head.ext.table_id;
+        const db = this.dbMap[table_id];
+        return { ...head, ...db, ...(this.getDbInfo(db) || {}), source: {}, qtype: head.qtype as SqlType }
+    }
+    private getDbInfo = (db: { database: string, table: string }): { pk: string, uni: (string)[] } | null => {
+        const map = db ? (this._schema[db.database] ? this._schema[db.database][db.table] : null) : null;
+        if (map === null) return null;
+        const cols = Object.values(map)
+        const set = new Set<string>();
+        const result: { pk: string, uni: string[] } = { pk: '', uni: [] }
+        for (const col of cols) {
+            if (col.COLUMN_KEY === 'PRI') {
+                result.pk = col.COLUMN_NAME;
+            }
+            if (col.COLUMN_KEY === 'UNI') {
+                set.add(col.COLUMN_NAME)
+            }
+        }
+        result.uni = Array.from(set)
+        return result;
+    }
     private static transform = (schema: MysqlMap, event: BinlogEvent) => {
         const map = schema[event.database] ? schema[event.database][event.table] : null;
         if (!map) return event;
@@ -67,7 +92,7 @@ export class Binlog {
                 event.pk = col.COLUMN_NAME;
             }
             if (col.COLUMN_KEY === 'UNI') {
-                event.uni.push(col.COLUMN_NAME)
+                event?.uni?.push(col.COLUMN_NAME)
             }
         }
         const resolve = (row: Record<string, string>) => {
@@ -115,7 +140,7 @@ export class Binlog {
                 return (res);
             }, {} as Record<string, Date | number | string | null>)
         }
-        switch (event.type) {
+        switch (event.qtype) {
             case 'UPDATE':
                 event.source = resolve(event.source)
                 event.update = resolve(event.update as Record<string, string>)
@@ -125,20 +150,30 @@ export class Binlog {
                 event.source = resolve(event.source)
                 break;
         }
-        event.value = event.source[event.pk] || 0;
+        if (event?.update && event.update[event?.pk || -1]) {
+            event.value = event.update[event?.pk || -1] || 0;
+        } else {
+            event.value = event.source[event?.pk || -1] || 0;
+        }
         return event;
     }
-    private static resolve = (input: string, baseInfo: { type: SqlType, crc32: string, emit_at: Date }): BinlogEvent => {
-        const _info = /### (?<type>UPDATE|INSERT|DELETE).+\`(?<database>.+?)\`\.\`(?<table>.+?)\`/.exec(input)?.groups;
-        const info: BinlogEvent = { ..._info, uni: [], pk: '', ...baseInfo } as any;
+    private static resolve = (input: string, head: BinlogEvent): BinlogEvent => {
         const reg = /@[\d]{1,2}\=.+/g
-        const [source, update] = (info.type === 'UPDATE' ? input.split('### SET').map(i => i.match(reg)) : [input.match(reg)]) || [];
+        const [source, update] = (head.qtype === 'UPDATE' ? input.split('### SET').map(i => i.match(reg)) : [input.match(reg)]) || [];
         const toRecord = (values: string[]) => {
             return values.length === 0 ? {} : values.reduce((res, acc) => (res[acc.split("=")[0]] = acc.split("=")[1], res), {} as Record<string, string>)
         }
-        info.source = toRecord(source as string[]);
-        info.update = toRecord((update || []) as string[]);
-        return info
+        const result = {
+            ...head, source: toRecord(source as string[]), update: toRecord((update || []))
+        }
+        if (head.qtype === 'UPDATE') {
+            Object.keys(result.update).map(k => {
+                if (result.source[k] !== undefined && result.update[k] === result.source[k]) {
+                    delete result.update[k]
+                }
+            })
+        }
+        return result;
     }
     private baseParam = ['-R', '--stop-never', '-v']
     private get dbParam() {
@@ -149,83 +184,55 @@ export class Binlog {
             ...(this.option.database ? [`--database=${this.option.database}`] : [])
         ]
     }
-
+    private dbMap: Record<number, { database: string, table: string }> = {};
+    private fixDb = (ev: BinlogEvent, str: string) => {
+        const match = /`(?<database>[\w]+?)`\.`(?<table>[\w]+?)`/.exec(str);
+        if (match) {
+            const dbinfo = this.getDbInfo(match.groups as any)
+            ev.database = match.groups?.database || '';
+            ev.table = match.groups?.table || ''
+            ev.pk = dbinfo?.pk
+            ev.uni = dbinfo?.uni
+        }
+    }
     run = (options: string[]) => {
+        interval(1000 * 3).subscribe(
+            () => {
+                if (this.pos > 0 && this.file.length > 0) {
+                    this.savePosition()
+                }
+            }
+        )
         const stream = spawn(this.path, [
             ...this.baseParam,
             ...this.dbParam,
             ...options
         ]);
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent>) => {
-            let pool: string = ''
-            const map: Record<'Write' | 'Delete' | 'Update', SqlType> = {
-                Write: "INSERT",
-                Delete: "DELETE",
-                Update: "UPDATE"
-            }
-            const getBlock = () => {
-                const match = pool.match(/^#([\d]{6}.+?flags: STMT_END_F)$/m);
-                if (match) {
-                    const start = match.index;
-                    const tmp = match.pop();
-                    if (tmp) {
-                        const info = /^(?<emit_at>\d{6} [\d:]{8}).+?end_log_pos (?<pos>\d+) CRC32 0x(?<crc32>[a-f\d]{8}).+?(?<type>Update|Write|Delete+?)_/i.exec(tmp)?.groups;
-                        if (!info) return null
-                        const pos = parseInt(info?.pos)
-                        const reg = new RegExp(`^# at ${pos + this.offset}$`, 'm');
-                        if (reg.test(pool)) {
-                            this.pos = pos
-                            pool = pool.substr(start as number)
-                            const end = pool.match(reg)?.index
-                            if (end) {
-                                const block = pool.substr(0, end);
-                                pool = pool.substr(end)
-                                const list = block.split(/(### INSERT|UPDATE|DELETE )/)
-                                list.shift();
-                                this.savePosition()
-                                return {
-                                    info: {
-                                        emit_at: moment('20' + info.emit_at, "YYYYMMDD HH:mm:ss").toDate(),
-                                        type: map[info.type as keyof typeof map],
-                                        crc32: info.crc32
-                                    },
-                                    list: list.reduce((res, str) => {
-                                        if (str[0] === '#') {
-                                            res.push(str);
-                                        } else {
-                                            if (res.length > 0) res[res.length - 1] = res[res.length - 1] + str
-                                        }
-                                        return res
-                                    }, [] as string[]).filter(i => i.indexOf('###') === 0)
-                                }
-                            }
-                        }
-                    }
-                }
-                return null
-            }
+            const br = new BinlogResolver;
             stream.stdout.on("data", (chunk) => {
-                pool += chunk.toString()
-                const positionReg = /Rotate to (?<file>mysql-bin.\d{6})  pos: (?<pos>\d+)$/m;
-                writeFileSync('./1.txt', chunk, { flag: 'a' })
-                if (positionReg.test(pool)) {
-                    const position = positionReg.exec(pool)?.groups
-                    this.file = position?.file || ''
-                    this.pos = parseInt(position?.pos || '0')
-                    const offsetReg = /[\w\W]+end_log_pos (?<pos>\d+) CRC32 0x[a-f\d]{8}.+?Start: binlog[\w\W]+?# at (?<pos_end>\d+)/;
-                    this.savePosition()
-                    if (offsetReg.test(pool)) {
-                        const offset = offsetReg.exec(pool)?.groups as { pos: string, pos_end: string };
-                        this.offset = parseInt(offset.pos_end) - parseInt(offset.pos)
-                    }
-                }
-                const { list, info } = getBlock() || { list: [] };
-                for (const str of list) {
-                    if (str.length) {
-                        info && obser.next(Binlog.transform(this._schema, Binlog.resolve(str, info)))
-                    }
-                }
+                br.push(chunk.toString());
             })
+            br.stream().subscribe((response) => {
+                const [str, head] = response
+                this.pos = head.end_log_pos
+                if (head.type === EVENT_TYPE.ROTATE_EVENT) {
+                    this.file = head.file
+                }
+                if (head.type === EVENT_TYPE.TABLE_MAP_EVENT) {
+                    const { map_to, table } = head.ext
+                    const [database, _table] = table.replace(/`/g, '').split('.')
+                    this.dbMap[map_to] = { database, table: _table }
+                }
+                const ev = this.head2event(head);
+                if (ev) {
+                    if (!ev.database) {
+                        this.fixDb(ev, str)
+                    }
+                    obser.next(Binlog.transform(this._schema, Binlog.resolve(str, ev)))
+                }
+
+            }, (e) => { obser.error(e) }, () => obser.complete())
             stream.on('error', (err) => {
                 obser.error(err);
                 obser.complete();
@@ -233,7 +240,6 @@ export class Binlog {
             stream.on('close', (code, sign) => {
                 obser.complete();
             })
-
         })))
     }
     positionPath = process.cwd() + "/position.json"

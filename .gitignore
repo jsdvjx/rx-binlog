@@ -60,3 +60,4 @@ dist
 # next.js build output
 .next
 src/test.ts
+position.json
