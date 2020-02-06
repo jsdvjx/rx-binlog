@@ -1,6 +1,6 @@
 {
     "name": "rx-binlog",
-    "version": "0.3.01",
+    "version": "0.3.02",
     "description": "",
     "main": "dist/index.js",
     "scripts": {
