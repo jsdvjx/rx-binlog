@@ -138,6 +138,10 @@ export class Binlog {
                     case 'timestamp':
                         res[name] = (_value && _value.length > 2) ?
                             new Date(_value) : new Date(0)
+                        if (_value === null) res[name] = new Date(0)
+                        if (isNaN((res[name] as Date).getTime())) {
+                            res[name] = new Date();
+                        }
                         break;
                 }
 

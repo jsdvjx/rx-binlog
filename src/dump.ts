@@ -24,8 +24,8 @@ export class Dump {
         ]
     }
 
-    insertSql = (option: { src: { table: string, database: string, pk?: string }, dest: string }) => {
-        const take = 500000;
+    insertSql = (option: { src: { table: string, database: string, pk?: string }, dest: string, take?: number }) => {
+        const take = option.take || 100000;
         const pk = option.src.pk ? `order by ${option.src.pk} asc` : '';
         return this.query.run(`select count(0)cnt from \`${option.src.database}\`.\`${option.src.table}\``).pipe(
             pluck("cnt"),
