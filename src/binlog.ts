@@ -1,14 +1,15 @@
 import { spawn, execSync } from "child_process"
-import { Observable, Observer, of, zip, Subject, interval } from 'rxjs'
+import { Observable, Observer, of, zip, Subject, interval, from } from 'rxjs'
 import * as mysql from 'mysql2'
 import { MysqlSchema, MysqlColumn, MysqlMap } from "./mysql.schema";
-import { tap, map, switchMap, toArray } from "rxjs/operators";
+import { tap, map, switchMap, toArray, mergeMap } from "rxjs/operators";
 import { Query } from "./query";
 import { Conn } from './conn'
 import moment, { unix } from "moment";
-import { writeFileSync, readFileSync, existsSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, statSync, readdirSync, writeFile } from "fs";
 import { BinlogResolver, EVENT_TYPE, EventHead } from "./binlog.resolver";
 import os from 'os'
+import { Logs } from "./logs";
 export type SqlType = "UPDATE" | "INSERT" | "DELETE"
 export interface BinlogEvent extends EventHead {
     qtype: SqlType,
@@ -37,6 +38,7 @@ export type option = {
 export interface MysqlBinlogFile { Log_name: string, File_size: number }
 export class Binlog {
     private path = `${__dirname}/../bin/mysqlbinlog`
+    private localLog = new Logs
     constructor(private option: BinlogOption) {
         if (os.platform() === 'linux') {
             execSync(`chmod +x ${this.path}`)
@@ -203,6 +205,30 @@ export class Binlog {
             ev.uni = dbinfo?.uni
         }
     }
+    private logPath = process.cwd() + '/logs';
+    read = () => {
+        return this.ready.pipe(
+            switchMap(() => (new BinlogResolver).stream()),
+            mergeMap(({ head, body }) => {
+                if (head.type === EVENT_TYPE.ROTATE_EVENT) {
+                    this.file = head.file
+                }
+                if (head.type === EVENT_TYPE.TABLE_MAP_EVENT) {
+                    const { map_to, table } = head.ext
+                    const [database, _table] = table.replace(/`/g, '').split('.')
+                    this.dbMap[map_to] = { database, table: _table }
+                }
+                const ev = this.head2event(head);
+                if (ev) {
+                    if (!ev.database) {
+                        this.fixDb(ev, body[0] || '')
+                    }
+                    return from(body.map(str => Binlog.transform(this._schema, Binlog.resolve(str, ev))))
+                }
+                return from([])
+            })
+        )
+    }
     run = (options: string[]) => {
         interval(1000 * 3).subscribe(
             () => {
@@ -217,30 +243,31 @@ export class Binlog {
             ...options
         ]);
         return this.ready.pipe(switchMap(() => new Observable((obser: Observer<BinlogEvent>) => {
-            const br = new BinlogResolver;
-            stream.stdout.on("data", (chunk) => {
-                br.push(chunk.toString());
+            // const br = new BinlogResolver;
+            stream.stdout.on("data", (chunk: Uint8Array) => {
+                this.localLog.write(chunk)
+                //               br.push(chunk.toString());
             })
-            br.stream().subscribe((response) => {
-                const [str, head] = response
-                this.pos = head.end_log_pos
-                if (head.type === EVENT_TYPE.ROTATE_EVENT) {
-                    this.file = head.file
-                }
-                if (head.type === EVENT_TYPE.TABLE_MAP_EVENT) {
-                    const { map_to, table } = head.ext
-                    const [database, _table] = table.replace(/`/g, '').split('.')
-                    this.dbMap[map_to] = { database, table: _table }
-                }
-                const ev = this.head2event(head);
-                if (ev) {
-                    if (!ev.database) {
-                        this.fixDb(ev, str)
-                    }
-                    obser.next(Binlog.transform(this._schema, Binlog.resolve(str, ev)))
-                }
+            // br.stream().subscribe((response) => {
+            //     const [str, head] = response
+            //     this.pos = head.end_log_pos
+            //     if (head.type === EVENT_TYPE.ROTATE_EVENT) {
+            //         this.file = head.file
+            //     }
+            //     if (head.type === EVENT_TYPE.TABLE_MAP_EVENT) {
+            //         const { map_to, table } = head.ext
+            //         const [database, _table] = table.replace(/`/g, '').split('.')
+            //         this.dbMap[map_to] = { database, table: _table }
+            //     }
+            //     const ev = this.head2event(head);
+            //     if (ev) {
+            //         if (!ev.database) {
+            //             this.fixDb(ev, str)
+            //         }
+            //         obser.next(Binlog.transform(this._schema, Binlog.resolve(str, ev)))
+            //     }
 
-            }, (e) => { obser.error(e) }, () => obser.complete())
+            // }, (e) => { obser.error(e) }, () => obser.complete())
             stream.on('error', (err) => {
                 obser.error(err);
                 obser.complete();
@@ -256,7 +283,7 @@ export class Binlog {
         return this.position().pipe(switchMap(this.run))
     }
     startWithLastFile = () => {
-        return this.position(true).pipe(
+        return this.position(false).pipe(
             map(list => {
                 return [...list]
             }),
