@@ -88,10 +88,13 @@ export class BinlogResolver {
                 }
                 return null;
             }),
-            filter(i => i !== null)
+            filter(i => i !== null),
+            tap((i) => {
+                console.log((new Date).getTime(), i?.head)
+            })
         ) : timer(100).pipe(switchMap(() => empty()))).pipe(
             //@ts-ignore
-            finalize(() => {
+            finalize((i) => {
                 this.lock = false
             })
         ) as Observable<{ head: EventHead, body: string[] }>
